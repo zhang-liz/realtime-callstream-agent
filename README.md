@@ -22,6 +22,7 @@ A full-duplex voice agent built with Twilio Media Streams, featuring real-time s
 - OpenAI API key
 - ElevenLabs API key
 - ngrok (for local development)
+- Node.js 18+ (for testing UI)
 
 ### Installation
 
@@ -68,6 +69,30 @@ PUBLIC_HOST=abc123.ngrok.io
 ```bash
 python app.py
 ```
+
+### Testing UI (Optional)
+
+For local testing without Twilio phone calls, use the included Next.js testing interface:
+
+**Quick Start (Recommended):**
+```bash
+./dev.sh
+```
+
+This starts both the FastAPI backend and Next.js frontend simultaneously.
+
+**Manual Setup:**
+```bash
+# Terminal 1 - Backend
+python app.py
+
+# Terminal 2 - Frontend
+cd voice-agent-ui
+npm install
+npm run dev
+```
+
+Then open [http://localhost:3000](http://localhost:3000) to test the voice agent directly via WebSocket.
 
 ### Twilio Configuration
 
