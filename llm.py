@@ -1,54 +1,53 @@
 import openai
 import asyncio
-import structlog
+from typing import Optional
 
-logger = structlog.get_logger()
+from exceptions import LLMError
+from config import Config, COLLECTIONS_AGENT_PROMPT
+from core.logging import get_logger
+
+logger = get_logger()
+
 
 class CollectionsAgent:
     """LLM-powered collections agent with compliance constraints"""
 
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, config: Config):
         self.client = openai.OpenAI(api_key=api_key)
+        self.config = config
+        self.system_prompt = COLLECTIONS_AGENT_PROMPT
 
     async def generate_response(self, user_message: str, stream_sid: str) -> str:
         """
-        Generate a response as a collections agent
+        Generate a response as a collections agent.
+        
+        Args:
+            user_message: The user's transcribed message
+            stream_sid: The stream SID for logging correlation
+            
+        Returns:
+            The generated response text
+            
+        Raises:
+            LLMError: If the LLM request fails
         """
-        system_prompt = """You are a professional collections agent for a financial services company. Your role is to help customers resolve outstanding payments in a respectful, empathetic, and compliant manner.
-
-Key guidelines:
-- Always be polite and professional
-- Listen actively to customer concerns
-- Offer flexible payment arrangements when appropriate
-- Never threaten legal action or collection agencies
-- Never discuss account details without verification
-- Keep responses concise and conversational
-- End conversations positively when possible
-
-You must comply with FDCPA and state collection laws:
-- No calls before 8 AM or after 9 PM local time
-- No harassment or abusive language
-- No false representations about amount owed
-- No threats of violence or arrest
-- No communication with third parties about debt
-
-Respond naturally as if speaking on a phone call."""
-
         try:
-            response = await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: self.client.chat.completions.create(
-                    model="gpt-3.5-turbo",
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_message}
-                    ],
-                    max_tokens=150,
-                    temperature=0.7
-                )
+            response = await asyncio.to_thread(
+                self.client.chat.completions.create,
+                model=self.config.llm_model,
+                messages=[
+                    {"role": "system", "content": self.system_prompt},
+                    {"role": "user", "content": user_message},
+                ],
+                max_tokens=self.config.llm_max_tokens,
+                temperature=self.config.llm_temperature,
             )
 
-            ai_response = response.choices[0].message.content.strip()
+            content = response.choices[0].message.content
+            if not content:
+                raise LLMError("LLM returned empty response")
+            
+            ai_response = content.strip()
 
             logger.info("LLM response generated",
                        stream_sid=stream_sid,
@@ -61,4 +60,4 @@ Respond naturally as if speaking on a phone call."""
             logger.error("LLM request failed",
                         stream_sid=stream_sid,
                         error=str(e))
-            return "I'm sorry, I'm having trouble processing your request. Can you please try again?"
+            raise LLMError(f"Failed to generate LLM response: {e}") from e

@@ -2,22 +2,27 @@ import asyncio
 import io
 import json
 import base64
-import uuid
 from typing import AsyncGenerator, Optional
 import httpx
 from pydub import AudioSegment
 import numpy as np
-import structlog
 
-logger = structlog.get_logger()
+from exceptions import TTSError, AudioProcessingError
+from config import Config
+from core.logging import get_logger
+from core.constants import EVENT_KEY, STREAM_SID_KEY, MEDIA_KEY, PAYLOAD_KEY, MARK_KEY, MARK_NAME_KEY
+
+logger = get_logger()
+
 
 class ElevenLabsTTS:
     """ElevenLabs streaming TTS with mu-law conversion"""
 
-    def __init__(self, api_key: str, voice_id: str = "21m00Tcm4TlvDq8ikWAM"):  # Default: Rachel voice
+    def __init__(self, api_key: str, config: Config):
         self.api_key = api_key
-        self.voice_id = voice_id
+        self.voice_id = config.elevenlabs_voice_id
         self.base_url = "https://api.elevenlabs.io/v1"
+        self.config = config
 
     async def generate_speech_stream(self, text: str, stream_sid: str) -> AsyncGenerator[bytes, None]:
         """
@@ -56,8 +61,7 @@ class ElevenLabsTTS:
             logger.error("ElevenLabs TTS failed",
                         stream_sid=stream_sid,
                         error=str(e))
-            # Return empty generator on error
-            return
+            raise TTSError(f"Failed to generate TTS: {e}") from e
 
     async def _convert_to_mulaw(self, audio_data: bytes) -> Optional[bytes]:
         """Convert audio data to mu-law format required by Twilio"""
@@ -78,7 +82,7 @@ class ElevenLabsTTS:
 
         except Exception as e:
             logger.error("Audio conversion failed", error=str(e))
-            return None
+            raise AudioProcessingError(f"Failed to convert audio to mu-law: {e}") from e
 
     def _pcm_to_mulaw(self, pcm_data: np.ndarray) -> np.ndarray:
         """Convert 16-bit PCM to 8-bit mu-law"""
@@ -104,8 +108,8 @@ class ElevenLabsTTS:
 class TwilioAudioStreamer:
     """Handle streaming audio to Twilio WebSocket"""
 
-    def __init__(self):
-        self.chunk_size = 320  # 20ms of 8kHz audio (160 samples per channel * 2 bytes, but mu-law is 1 byte per sample)
+    def __init__(self, config: Config):
+        self.chunk_size = config.tts_chunk_size
 
     async def stream_to_twilio(self, websocket, tts_generator: AsyncGenerator[bytes, None], stream_sid: str, mark_id: str):
         """Stream TTS audio chunks to Twilio WebSocket"""
@@ -120,13 +124,10 @@ class TwilioAudioStreamer:
 
                         # Send media message
                         media_message = {
-                            "event": "media",
-                            "streamSid": stream_sid,
-                            "media": {
-                                "payload": encoded_audio
-                            }
+                            EVENT_KEY: "media",
+                            STREAM_SID_KEY: stream_sid,
+                            MEDIA_KEY: {PAYLOAD_KEY: encoded_audio},
                         }
-
                         await websocket.send_text(json.dumps(media_message))
 
                         # Small delay to prevent overwhelming the WebSocket
@@ -134,13 +135,10 @@ class TwilioAudioStreamer:
 
             # Send mark message to indicate completion
             mark_message = {
-                "event": "mark",
-                "streamSid": stream_sid,
-                "mark": {
-                    "name": mark_id
-                }
+                EVENT_KEY: "mark",
+                STREAM_SID_KEY: stream_sid,
+                MARK_KEY: {MARK_NAME_KEY: mark_id},
             }
-
             await websocket.send_text(json.dumps(mark_message))
             logger.info("TTS streaming completed", stream_sid=stream_sid, mark_id=mark_id)
 
