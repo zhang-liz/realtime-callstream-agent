@@ -149,22 +149,31 @@ def test_package_json_structure():
         return False
 
 def test_api_endpoints_structure():
-    """Test that the API endpoints are properly defined"""
+    """Test that the API endpoints are properly defined."""
     print("🧪 Testing API endpoints structure...")
 
     try:
-        with open("app.py", 'r') as f:
-            content = f.read()
+        with open("app.py", "r") as f:
+            app_content = f.read()
+        with open("handlers.py", "r") as f:
+            handlers_content = f.read()
+        with open("routers/voice.py", "r") as f:
+            voice_content = f.read()
+        with open("routers/media.py", "r") as f:
+            media_content = f.read()
 
-        # Check for key endpoints
-        assert "@app.post(\"/voice\")" in content
-        assert "@app.websocket(\"/media\")" in content
-        assert "@app.get(\"/\")" in content
+        # App mounts routers and has root endpoint
+        assert "include_router" in app_content
+        assert 'get("/")' in app_content
 
-        # Check for key functions
-        assert "handle_start" in content
-        assert "handle_media" in content
-        assert "handle_mark" in content
+        # Voice and media routers define endpoints
+        assert "/voice" in voice_content
+        assert "/media" in media_content
+
+        # Handlers implement message handling
+        assert "handle_start" in handlers_content
+        assert "handle_media" in handlers_content
+        assert "handle_mark" in handlers_content
 
         print("✅ API endpoints structure is valid")
         return True
