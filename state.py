@@ -57,6 +57,8 @@ class CallStateManager:
             # Cancel any running TTS task
             if call_state.current_tts_task and not call_state.current_tts_task.done():
                 call_state.current_tts_task.cancel()
+            # Reset LLM conversation history for this call
+            call_state.llm_agent.reset_history()
             # Cleanup STT stream state
             call_state.stt_processor.cleanup_stream_state(stream_sid)
             del self._call_states[stream_sid]
