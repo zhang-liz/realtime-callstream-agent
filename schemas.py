@@ -2,18 +2,16 @@
 
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class TwilioMessageBase(BaseModel):
     """Base for Twilio Media Streams WebSocket messages."""
 
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
     event: str
     streamSid: Optional[str] = Field(None, alias="streamSid")
-
-    class Config:
-        populate_by_name = True
-        extra = "allow"  # Allow additional Twilio payload fields
 
 
 class TwilioStartPayload(TwilioMessageBase):
@@ -36,6 +34,12 @@ class TwilioMarkPayload(TwilioMessageBase):
 
     event: str = "mark"
     mark: Optional[dict[str, Any]] = None
+
+
+class TwilioStopPayload(TwilioMessageBase):
+    """Payload for 'stop' event."""
+
+    event: str = "stop"
 
 
 def parse_twilio_message(data: dict) -> TwilioMessageBase:
