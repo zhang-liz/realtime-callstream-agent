@@ -38,7 +38,7 @@ class StreamingSTT:
             self._stream_states[stream_sid] = StreamState()
         return self._stream_states[stream_sid]
 
-    def     def cleanup_stream_state(self, stream_sid: str) -> None:
+    def cleanup_stream_state(self, stream_sid: str) -> None:
         """Clean up state for a stream. Call when call ends."""
         if stream_sid in self._stream_states:
             del self._stream_states[stream_sid]
