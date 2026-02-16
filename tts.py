@@ -49,13 +49,22 @@ class ElevenLabsTTS:
                 async with client.stream("POST", url, json=payload, headers=headers) as response:
                     response.raise_for_status()
 
-                    # Process audio stream in chunks
+                    # Buffer full MP3 so we decode once (streaming chunks can be partial frames)
+                    buffer = bytearray()
                     async for chunk in response.aiter_bytes():
                         if chunk:
-                            # Convert MP3 chunk to mu-law
-                            mulaw_chunk = await self._convert_to_mulaw(chunk)
-                            if mulaw_chunk:
-                                yield mulaw_chunk
+                            buffer.extend(chunk)
+
+                    if not buffer:
+                        return
+
+                    # Single decode of complete MP3, then yield mu-law in chunks
+                    mulaw_full = await self._convert_to_mulaw(bytes(buffer))
+                    if not mulaw_full:
+                        return
+                    chunk_size = self.config.tts_chunk_size
+                    for i in range(0, len(mulaw_full), chunk_size):
+                        yield mulaw_full[i : i + chunk_size]
 
         except Exception as e:
             logger.error("ElevenLabs TTS failed",
