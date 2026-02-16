@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import WebSocket
 
 from core.constants import (
+    EVENT_KEY,
     STREAM_SID_KEY,
     MEDIA_KEY,
     PAYLOAD_KEY,

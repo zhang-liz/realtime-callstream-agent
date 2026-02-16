@@ -2,10 +2,12 @@
 
 import json
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from pydantic import ValidationError
 
 from state import CallStateManager
 from core.logging import get_logger
-from core.constants import TwilioEvent, STREAM_SID_KEY, EVENT_KEY
+from core.constants import TwilioEvent
+from schemas import parse_twilio_message
 
 from handlers import handle_start, handle_media, handle_stop, handle_mark
 
@@ -26,15 +28,25 @@ async def media_websocket(
     try:
         while True:
             message = await websocket.receive_text()
-            data = json.loads(message)
+            try:
+                data = json.loads(message)
+            except json.JSONDecodeError as e:
+                logger.warning("Invalid JSON in WebSocket message", error=str(e))
+                continue
 
-            msg_type = data.get(EVENT_KEY)
-            stream_sid = data.get(STREAM_SID_KEY)
+            try:
+                parsed = parse_twilio_message(data)
+            except ValidationError as e:
+                logger.warning("Invalid Twilio message shape", errors=e.errors(), raw=data)
+                continue
 
-            if not stream_sid:
+            msg_type = parsed.event
+            sid = parsed.streamSid
+            if not sid:
                 logger.warning("No streamSid in message", message=data)
                 continue
 
+            stream_sid = sid
             was_new = not call_state_manager.exists(stream_sid)
             call_state = call_state_manager.get_or_create(stream_sid)
             if was_new:
