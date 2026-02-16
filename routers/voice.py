@@ -1,5 +1,6 @@
 """Twilio voice webhook and TwiML."""
 
+import re
 from fastapi import APIRouter, Request, HTTPException, Depends
 from fastapi.responses import HTMLResponse
 from twilio.twiml.voice_response import VoiceResponse
@@ -10,6 +11,24 @@ from exceptions import ConfigurationError
 from core.logging import get_logger
 
 logger = get_logger()
+
+# Strip optional scheme and path so we always build wss://host/media ourselves
+_HOST_STRIP = re.compile(r"^(?://|https?://|wss?://)?([^/]+).*$")
+
+
+def normalize_media_stream_url(public_host: str, path: str = "/media") -> str:
+    """Build a wss:// URL for Twilio Media Streams from PUBLIC_HOST.
+    Tolerates PUBLIC_HOST with or without scheme (e.g. https://example.com or example.com).
+    """
+    if not public_host or not public_host.strip():
+        return f"wss://localhost:8000{path}"
+    host = public_host.strip()
+    match = _HOST_STRIP.match(host)
+    if match:
+        host = match.group(1).rstrip("/")
+    if not host:
+        return f"wss://localhost:8000{path}"
+    return f"wss://{host}{path}"
 
 
 def get_config() -> Config:
@@ -43,7 +62,8 @@ async def voice_webhook(
         raise HTTPException(status_code=403, detail="Invalid signature")
 
     response = VoiceResponse()
-    response.connect().stream(url=f"wss://{config.public_host}/media")
+    stream_url = normalize_media_stream_url(config.public_host)
+    response.connect().stream(url=stream_url)
 
     logger.info("Returning TwiML response")
     return HTMLResponse(content=str(response), media_type="application/xml")
