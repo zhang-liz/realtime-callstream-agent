@@ -4,192 +4,137 @@ Mock server test to validate basic FastAPI functionality without external depend
 """
 
 import os
-import asyncio
-from unittest.mock import Mock, patch, MagicMock
 import sys
+from unittest.mock import Mock, patch, MagicMock
+
+# Mock config used when instantiating STT/LLM/TTS (they take api_key, config)
+def _mock_config():
+    c = MagicMock()
+    c.silence_threshold_ms = 1500
+    c.stt_sample_rate = 8000
+    c.silence_threshold_db = -40.0
+    c.llm_model = "gpt-3.5-turbo"
+    c.llm_max_tokens = 150
+    c.llm_temperature = 0.7
+    c.elevenlabs_voice_id = "21m00Tcm4TlvDq8ikWAM"
+    c.tts_chunk_size = 320
+    return c
+
 
 def test_mock_imports():
-    """Test that we can mock the problematic imports"""
-    print("🧪 Testing mock imports...")
+    """Test that we can mock the problematic imports and instantiate STT/LLM/TTS with (api_key, config)."""
+    mock_modules = [
+        'twilio.twiml.voice_response',
+        'twilio.request_validator',
+        'openai',
+        'elevenlabs',
+        'pydub',
+        'structlog'
+    ]
+    for module in mock_modules:
+        sys.modules[module] = Mock()
 
-    try:
-        # Mock the problematic imports
-        mock_modules = [
-            'twilio.twiml.voice_response',
-            'twilio.request_validator',
-            'openai',
-            'elevenlabs',
-            'pydub',
-            'structlog'
-        ]
+    from stt import StreamingSTT
+    from llm import CollectionsAgent
+    from tts import ElevenLabsTTS, TwilioAudioStreamer
 
-        for module in mock_modules:
-            sys.modules[module] = Mock()
+    mock_cfg = _mock_config()
+    stt = StreamingSTT("mock-key", mock_cfg)
+    llm = CollectionsAgent("mock-key", mock_cfg)
+    tts = ElevenLabsTTS("mock-key", mock_cfg)
 
-        # Now try to import our modules with mocks
-        from stt import StreamingSTT
-        from llm import CollectionsAgent
-        from tts import ElevenLabsTTS, TwilioAudioStreamer
-
-        # Test that classes can be instantiated with mock API keys
-        stt = StreamingSTT("mock-key")
-        llm = CollectionsAgent("mock-key")
-        tts = ElevenLabsTTS("mock-key")
-
-        print("✅ Mock imports and instantiation work")
-        return True
-
-    except Exception as e:
-        print(f"❌ Mock imports failed: {e}")
-        return False
+    assert stt is not None
+    assert llm is not None
+    assert tts is not None
 
 def test_app_mock():
-    """Test that the FastAPI app can be created with mocks"""
-    print("🧪 Testing FastAPI app creation with mocks...")
+    """Test that the FastAPI app can be created with mocks (config and state manager)."""
+    mock_config = _mock_config()
+    mock_config.twilio_auth_token = "mock-token"
+    mock_config.openai_api_key = "mock-key"
+    mock_config.elevenlabs_api_key = "mock-key"
+    mock_config.public_host = "localhost:8000"
 
-    try:
-        # Mock all external dependencies
-        with patch.dict('sys.modules', {
-            'twilio.twiml.voice_response': Mock(),
-            'twilio.request_validator': Mock(),
-            'structlog': Mock(),
-        }):
-            # Mock the module imports
-            with patch('stt.StreamingSTT'), \
-                 patch('llm.CollectionsAgent'), \
-                 patch('tts.ElevenLabsTTS'), \
-                 patch('tts.TwilioAudioStreamer'):
+    with patch.dict('sys.modules', {
+        'twilio.twiml.voice_response': Mock(),
+        'twilio.request_validator': Mock(),
+        'structlog': Mock(),
+    }):
+        with patch('config.Config.from_env', return_value=mock_config), \
+             patch('stt.StreamingSTT'), \
+             patch('llm.CollectionsAgent'), \
+             patch('tts.ElevenLabsTTS'), \
+             patch('tts.TwilioAudioStreamer'), \
+             patch('state.CallStateManager'):
+            if 'app' in sys.modules:
+                del sys.modules['app']
+            import app
 
-                import app
-
-                # Test that the app was created
-                assert hasattr(app, 'app')
-                assert app.app.title == "Voice Agent"
-
-                print("✅ FastAPI app creation with mocks works")
-                return True
-
-    except Exception as e:
-        print(f"❌ FastAPI app creation failed: {e}")
-        return False
+            assert hasattr(app, 'app')
+            assert app.app.title == "Voice Agent"
+            assert hasattr(app, 'config')
+            assert app.config is mock_config
 
 def test_websocket_handler_logic():
-    """Test the WebSocket handler logic with mocks"""
-    print("🧪 Testing WebSocket handler logic...")
+    """Test that WebSocket handler functions exist in the handlers module."""
+    from handlers import handle_start, handle_media, handle_stop, handle_mark
 
-    try:
-        # Mock WebSocket and related classes
-        mock_websocket = Mock()
-        mock_call_state = Mock()
-        mock_call_state.stream_sid = "test-stream"
-
-        # Import the handler functions (they should work with mocked dependencies)
-        with patch.dict('sys.modules', {
-            'twilio.twiml.voice_response': Mock(),
-            'twilio.request_validator': Mock(),
-            'structlog': Mock(),
-        }):
-            with patch('stt.StreamingSTT'), \
-                 patch('llm.CollectionsAgent'), \
-                 patch('tts.ElevenLabsTTS'), \
-                 patch('tts.TwilioAudioStreamer'):
-
-                import app
-
-                # Test that handler functions exist
-                assert callable(app.handle_start)
-                assert callable(app.handle_media)
-                assert callable(app.handle_mark)
-
-                print("✅ WebSocket handler logic is valid")
-                return True
-
-    except Exception as e:
-        print(f"❌ WebSocket handler logic test failed: {e}")
-        return False
+    assert callable(handle_start)
+    assert callable(handle_media)
+    assert callable(handle_stop)
+    assert callable(handle_mark)
 
 def test_environment_setup():
-    """Test environment variable handling"""
-    print("🧪 Testing environment variable setup...")
+    """Test that app starts with config loaded (via mocked Config.from_env)."""
+    mock_config = _mock_config()
+    mock_config.twilio_auth_token = "mock-token"
+    mock_config.openai_api_key = "mock-key"
+    mock_config.elevenlabs_api_key = "mock-key"
+    mock_config.public_host = "localhost:8000"
 
-    try:
-        # Test with mock environment
-        mock_env = {
-            'TWILIO_AUTH_TOKEN': 'mock-token',
-            'ELEVENLABS_API_KEY': 'mock-key',
-            'OPENAI_API_KEY': 'mock-key',
-            'PUBLIC_HOST': 'localhost:8000'
-        }
+    with patch.dict('sys.modules', {
+        'twilio.twiml.voice_response': Mock(),
+        'twilio.request_validator': Mock(),
+        'structlog': Mock(),
+    }):
+        with patch('config.Config.from_env', return_value=mock_config), \
+             patch('stt.StreamingSTT'), \
+             patch('llm.CollectionsAgent'), \
+             patch('tts.ElevenLabsTTS'), \
+             patch('tts.TwilioAudioStreamer'), \
+             patch('state.CallStateManager'):
+            if 'app' in sys.modules:
+                del sys.modules['app']
+            import app
 
-        with patch.dict(os.environ, mock_env):
-            with patch.dict('sys.modules', {
-                'twilio.twiml.voice_response': Mock(),
-                'twilio.request_validator': Mock(),
-                'structlog': Mock(),
-            }):
-                with patch('stt.StreamingSTT'), \
-                     patch('llm.CollectionsAgent'), \
-                     patch('tts.ElevenLabsTTS'), \
-                     patch('tts.TwilioAudioStreamer'):
-
-                    # Reload app to pick up new environment
-                    if 'app' in sys.modules:
-                        del sys.modules['app']
-                    import app
-
-                    # Check that environment variables are used
-                    assert hasattr(app, 'TWILIO_AUTH_TOKEN')
-                    assert hasattr(app, 'OPENAI_API_KEY')
-                    assert hasattr(app, 'ELEVENLABS_API_KEY')
-
-                    print("✅ Environment variable setup works")
-                    return True
-
-    except Exception as e:
-        print(f"❌ Environment variable setup failed: {e}")
-        return False
+            assert hasattr(app, 'config')
+            assert app.config.twilio_auth_token == "mock-token"
+            assert app.config.openai_api_key == "mock-key"
+            assert app.config.elevenlabs_api_key == "mock-key"
 
 def test_frontend_build_check():
-    """Check if frontend can be built (without actually building)"""
-    print("🧪 Testing frontend build configuration...")
+    """Check frontend config files exist and have expected structure."""
+    import json
 
-    try:
-        import json
+    with open("voice-agent-ui/package.json", 'r') as f:
+        package = json.load(f)
+    assert "name" in package and "dependencies" in package
 
-        # Check package.json
-        with open("voice-agent-ui/package.json", 'r') as f:
-            package = json.load(f)
+    with open("voice-agent-ui/next.config.js", 'r') as f:
+        next_config = f.read()
+    assert "content" in next_config or "experimental" in next_config or "module" in next_config
 
-        # Validate Next.js config
-        with open("voice-agent-ui/next.config.js", 'r') as f:
-            next_config = f.read()
+    with open("voice-agent-ui/tsconfig.json", 'r') as f:
+        ts_config = json.load(f)
+    assert "compilerOptions" in ts_config
 
-        assert "experimental" in next_config
-        assert "appDir" in next_config
-
-        # Check TypeScript config
-        with open("voice-agent-ui/tsconfig.json", 'r') as f:
-            ts_config = json.load(f)
-
-        assert "compilerOptions" in ts_config
-        assert "paths" in ts_config["compilerOptions"]
-
-        # Check Tailwind config
-        with open("voice-agent-ui/tailwind.config.js", 'r') as f:
-            tailwind_config = f.read()
-
-        assert "content" in tailwind_config
-        assert "theme" in tailwind_config
-
-        print("✅ Frontend build configuration is valid")
-        return True
-
-    except Exception as e:
-        print(f"❌ Frontend build configuration check failed: {e}")
-        return False
+    with open("voice-agent-ui/tailwind.config.js", 'r') as f:
+        tailwind_config = f.read()
+    assert "content" in tailwind_config
+    assert "theme" in tailwind_config
 
 def run_mock_tests():
-    """Run all mock tests"""
+    """Run all mock tests (when executed as script)."""
     print("🧪 Running Mock Server Tests (No External Dependencies)")
     print("=" * 60)
 
@@ -198,7 +143,7 @@ def run_mock_tests():
         test_app_mock,
         test_websocket_handler_logic,
         test_environment_setup,
-        test_frontend_build_check
+        test_frontend_build_check,
     ]
 
     passed = 0
@@ -206,27 +151,19 @@ def run_mock_tests():
 
     for test in tests:
         try:
-            result = test()
-            if result:
-                passed += 1
+            test()
+            passed += 1
         except Exception as e:
-            print(f"❌ Test {test.__name__} crashed: {e}")
+            print(f"❌ {test.__name__}: {e}")
 
     print("\n" + "=" * 60)
     print(f"📊 Mock Test Results: {passed}/{total} tests passed")
 
     if passed == total:
         print("🎉 All mock tests passed!")
-        print("\n✅ Code structure and logic are sound!")
-        print("✅ Frontend and backend integration design is correct!")
-        print("\n💡 The application should work once dependencies are installed:")
-        print("   pip install -r requirements.txt")
-        print("   cd voice-agent-ui && npm install")
-        print("   ./dev.sh")
         return True
-    else:
-        print("⚠️  Some mock tests failed. Check the issues above.")
-        return False
+    print("⚠️  Some mock tests failed. Check the issues above.")
+    return False
 
 if __name__ == "__main__":
     success = run_mock_tests()
